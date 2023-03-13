@@ -1,0 +1,137 @@
+variable "OctoPetShop.CleanedEnvironmentName" {
+    value "#{Octopus.Environment.Name | Replace \"[^a-zA-Z]+\" \"-\" | ToLower}" {}
+}
+
+variable "OctoPetShop.CleanedSpaceName" {
+    value "#{Octopus.Space.Name | Replace \"[^a-zA-Z]+\" \"-\" | ToLower}" {}
+}
+
+variable "OctoPetShop.Cluster.Namespace" {
+    value "#{OctoPetShop.CleanedSpaceName}-#{OctoPetShop.CleanedEnvironmentName}" {}
+}
+
+variable "OctoPetShop.Container.MemoryLimit" {
+    value "500Mi" {}
+}
+
+variable "OctoPetShop.Container.MemoryRequest" {
+    value "10Mi" {}
+}
+
+variable "OctoPetShop.Database.ConnectionString" {
+    value "Data Source=#{OctoPetShop.Database.Server};Initial Catalog=#{OctoPetShop.Database.Name};Persist Security Info=False;User ID=#{OctoPetShop.Database.User};Password=#{OctoPetShop.Database.Password};TrustServerCertificate=true" {}
+}
+
+variable "OctoPetShop.Database.Container.MemoryLimit" {
+    value "1000Mi" {}
+}
+
+variable "OctoPetShop.Database.Container.MemoryRequest" {
+    value "#{OctoPetShop.Container.MemoryRequest}" {}
+}
+
+variable "OctoPetShop.Database.Name" {
+    value "ops-#{Octopus.Environment.Name | ToLower}" {}
+}
+
+variable "OctoPetShop.Database.Server" {
+    value "#{OctoPetShop.Database.ServiceName}" {}
+}
+
+variable "OctoPetShop.Database.ServiceName" {
+    value "octopetshop-database" {}
+}
+
+variable "OctoPetShop.Database.User" {
+    value "sa" {}
+}
+
+variable "OctoPetShop.K8s.SecretName" {
+    value "#{Octopus.Action.KubernetesContainers.SecretName}-#{Octopus.Deployment.Id | ToLower}" {}
+}
+
+variable "OctoPetShop.Process.SkipApproval" {
+    value "False" {}
+}
+
+variable "OctoPetShop.ProductApi.Container.MemoryLimit" {
+    value "#{OctoPetShop.Container.MemoryLimit}" {}
+}
+
+variable "OctoPetShop.ProductApi.Container.MemoryRequest" {
+    value "#{OctoPetShop.Container.MemoryRequest}" {}
+}
+
+variable "OctoPetShop.ProductApi.HttpPort" {
+    value "5011" {}
+}
+
+variable "OctoPetShop.ProductApi.HttpsPort" {
+    value "5014" {}
+}
+
+variable "OctoPetShop.ProductApi.ServiceName" {
+    value "octopetshop-product-api" {}
+}
+
+variable "OctoPetShop.ProductApi.Url" {
+    value "http://#{OctoPetShop.ProductApi.ServiceName}:#{OctoPetShop.ProductApi.HttpPort}/" {}
+}
+
+variable "OctoPetShop.ShoppingCart.HttpPort" {
+    value "5012" {}
+}
+
+variable "OctoPetShop.ShoppingCart.HttpsPort" {
+    value "5013" {}
+}
+
+variable "OctoPetShop.ShoppingCartApi.Container.MemoryLimit" {
+    value "#{OctoPetShop.Container.MemoryLimit}" {}
+}
+
+variable "OctoPetShop.ShoppingCartApi.Container.MemoryRequest" {
+    value "#{OctoPetShop.Container.MemoryRequest}" {}
+}
+
+variable "OctoPetShop.ShoppingCartApi.ServiceName" {
+    value "octopetshop-shoppingcart-api" {}
+}
+
+variable "OctoPetShop.ShoppingCartApi.Url" {
+    value "http://#{OctoPetShop.ShoppingCartApi.ServiceName}:#{OctoPetShop.ShoppingCartApi.HttpPort}/" {}
+}
+
+variable "OctoPetShop.WebApp.Container.MemoryLimit" {
+    value "#{OctoPetShop.Container.MemoryLimit}" {}
+}
+
+variable "OctoPetShop.WebApp.Container.MemoryRequest" {
+    value "#{OctoPetShop.Container.MemoryRequest}" {}
+}
+
+variable "OctoPetShop.WebApp.HttpPort" {
+    value "5000" {}
+}
+
+variable "OctoPetShop.WebApp.HttpsPort" {
+    value "5001" {}
+}
+
+variable "OctoPetShop.WebApp.ServiceName" {
+    value "octopetshop-web-app" {}
+}
+
+variable "OctoPetShop.WorkerPool" {
+    type = "WorkerPool"
+
+    value "azure-worker-pool" {}
+}
+
+variable "Octopus.Azure.Account" {
+    type = "AzureAccount"
+
+    value "octopetshop-azure-subscription" {
+        action = ["create-web-app-service"]
+    }
+}
