@@ -1,0 +1,286 @@
+step "approve-deployment" {
+    condition = "Variable"
+    name = "Approve Deployment"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Trigger.Id}True#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Manual"
+        environments = ["production"]
+        is_required = true
+        notes = "Require approval from someone with the appropriate permissions."
+        properties = {
+            Octopus.Action.Manual.BlockConcurrentDeployments = "True"
+            Octopus.Action.Manual.Instructions = "Please enter notes below and either approve or cancel the deployment."
+        }
+        worker_pool_variable = ""
+    }
+}
+
+step "create-infrastructure" {
+    name = "Create Infrastructure"
+
+    action {
+        action_type = "Octopus.TerraformApply"
+        notes = "Use Terraform to create the Azure database and web app."
+        properties = {
+            Octopus.Action.AzureAccount.Variable = "RandomQuotes.Azure.Account"
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Terraform.AllowPluginDownloads = "True"
+            Octopus.Action.Terraform.AzureAccount = "True"
+            Octopus.Action.Terraform.GoogleCloudAccount = "False"
+            Octopus.Action.Terraform.ManagedAccount = "None"
+            Octopus.Action.Terraform.PlanJsonOutput = "False"
+            Octopus.Action.Terraform.RunAutomaticFileSubstitution = "True"
+            Octopus.Action.Terraform.Template = <<-EOT
+                terraform {
+                  backend "azurerm" {
+                    resource_group_name  = "demo.octopus.app"
+                    storage_account_name = "octodemotfstate"
+                    container_name       = "terraform-state"
+                    key                  = "random-quotes-#{RandomQuotes.Terraform.StateKey}.terraform.tfstate"
+                  }
+                }
+                
+                provider "azurerm" {
+                   features {}
+                }
+                
+                variable "resourcegroupname" {
+                  type = "string"
+                  default = "#{RandomQuotes.Azure.ResourceGroup.Name}"
+                }
+                
+                variable "webappname" {
+                  type = "string"
+                  default = "#{RandomQuotes.Azure.WebApp.Name}"
+                }
+                
+                variable "databaseserver" {
+                  type = "string"
+                  default = "#{RandomQuotes.Azure.Database.ServerName}"
+                }
+                
+                variable "databasename" {
+                  type = "string"
+                  default = "#{RandomQuotes.Azure.Database.Name}"
+                }
+                
+                variable "environment" {
+                  type = "string"
+                  default = "#{RandomQuotes.Environment}"
+                }
+                
+                variable "location" {
+                  type = "string"
+                  default = "#{RandomQuotes.Tenant.Azure.Location}"
+                }
+                
+                variable "region" {
+                  type = "string"
+                  default = "#{RandomQuotes.Tenant.Azure.Region}"
+                }
+                
+                variable "owner" {
+                  type = "string"
+                  default = "#{Tenant.Key}"
+                }
+                
+                variable "description" {
+                  type = "string"
+                  default = "#{RandomQuotes.Azure.WebApp.Description}"
+                }
+                
+                resource "azurerm_app_service_plan" "main" {
+                  name = "${var.webappname}-service-plan"
+                  location = "${var.location}"
+                  resource_group_name = "${var.resourcegroupname}"
+                  kind = "Linux"
+                  reserved = true
+                
+                  sku {
+                    tier = "Basic"
+                    size = "B1"
+                  }
+                
+                  tags = {
+                    description = "${var.description}"
+                    environment = "${var.environment}"
+                    owner       = "${var.owner}"
+                  }
+                }
+                
+                resource "azurerm_app_service" "main" {
+                  name                = "${var.webappname}"
+                  location = "${var.location}"
+                  resource_group_name = "${var.resourcegroupname}"
+                  app_service_plan_id = "${azurerm_app_service_plan.main.id}"
+                
+                  site_config {
+                    linux_fx_version = "DOTNETCORE|3.1"
+                  }
+                
+                  tags = {
+                    description = "${var.description}"
+                    environment = "${var.environment}"
+                    owner       = "${var.owner}"
+                    octopus-environment = "#{Octopus.Environment.Name}"
+                    octopus-role = "random-quotes-web"
+                    octopus-tenant = "#{Octopus.Deployment.Tenant.Name}"
+                  }
+                }
+                
+                resource "azurerm_sql_database" "main" {
+                  name                = "${var.databasename}"
+                  resource_group_name = "${var.resourcegroupname}"
+                  location            = "${var.location}"
+                  server_name         = "${var.databaseserver}"
+                  edition             = "Basic"
+                
+                  tags = {
+                    description = "${var.description}"
+                    environment = "${var.environment}"
+                    owner       = "${var.owner}"
+                  }
+                }
+                EOT
+            Octopus.Action.Terraform.TemplateParameters = "{\"resourcegroupname\":\"#{RandomQuotes.Azure.ResourceGroup.Name}\",\"webappname\":\"#{RandomQuotes.Azure.WebApp.Name}\",\"databaseserver\":\"#{RandomQuotes.Azure.Database.ServerName}\",\"databasename\":\"#{RandomQuotes.Azure.Database.Name}\",\"environment\":\"#{RandomQuotes.Environment}\",\"location\":\"#{RandomQuotes.Tenant.Azure.Location}\",\"region\":\"#{RandomQuotes.Tenant.Azure.Region}\",\"owner\":\"#{Tenant.Key}\",\"description\":\"#{RandomQuotes.Azure.WebApp.Description}\"}"
+        }
+        worker_pool_variable = "RandomQuotes.WorkerPool"
+    }
+}
+
+step "configure-web-app-pre-deploy" {
+    name = "Configure Web App - Pre Deploy"
+
+    action {
+        action_type = "Octopus.AzurePowerShell"
+        notes = "Use the Azure CLI to configure a few web app settings."
+        properties = {
+            Octopus.Action.Azure.AccountId = "#{RandomQuotes.Azure.Account}"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $resourceGroup = $OctopusParameters["RandomQuotes.Azure.ResourceGroup.Name"]
+                $webApp = $OctopusParameters["RandomQuotes.Azure.WebApp.Name"]
+                
+                az webapp config appsettings set --settings WEBSITE_WEBDEPLOY_USE_SCM=false -n $webApp -g $resourceGroup | Out-Null
+                
+                Write-Host "WEBSITE_WEBDEPLOY_USE_SCM set to false"
+                Write-Host "Azure Web App ${webApp} configured"
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "RandomQuotes.WorkerPool"
+    }
+}
+
+step "deploy-azure-web-app" {
+    name = "Deploy Azure Web App"
+    properties = {
+        Octopus.Action.TargetRoles = "random-quotes-web"
+    }
+
+    action {
+        action_type = "Octopus.AzureWebApp"
+        notes = "Deploy the Random Quotes app to the Azure Web App."
+        properties = {
+            Octopus.Action.Azure.RemoveAdditionalFiles = "True"
+            Octopus.Action.Azure.UseChecksum = "False"
+            Octopus.Action.EnabledFeatures = "Octopus.Features.JsonConfigurationVariables"
+            Octopus.Action.Package.DownloadOnTentacle = "False"
+            Octopus.Action.Package.FeedId = "octopus-server-built-in"
+            Octopus.Action.Package.JsonConfigurationVariablesTargets = "appsettings.json"
+            Octopus.Action.Package.PackageId = "RandomQuotes"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "RandomQuotes.WorkerPool"
+
+        packages {
+            acquisition_location = "Server"
+            feed = "octopus-server-built-in"
+            package_id = "RandomQuotes"
+            properties = {
+                SelectionMode = "immediate"
+            }
+        }
+    }
+}
+
+step "configure-web-app-post-deploy" {
+    name = "Configure Web App - Post Deploy"
+
+    action {
+        action_type = "Octopus.AzurePowerShell"
+        notes = "Use the Azure CLI to configure a few web app settings."
+        properties = {
+            Octopus.Action.Azure.AccountId = "#{RandomQuotes.Azure.Account}"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $resourceGroup = $OctopusParameters["RandomQuotes.Azure.ResourceGroup.Name"]
+                $webApp = $OctopusParameters["RandomQuotes.Azure.WebApp.Name"]
+                
+                az webapp config set --resource-group "$resourceGroup" --name "$webapp" --startup-file "dotnet ./RandomQuotes.dll"
+                
+                Write-Host "Azure Web App ${webApp} configured"
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "RandomQuotes.WorkerPool"
+    }
+}
+
+step "configure-sso" {
+    name = "Configure SSO"
+
+    action {
+        action_type = "Octopus.Script"
+        notes = "Configure the SSO feature for any tenants with the SSO tag."
+        properties = {
+            Octopus.Action.Script.ScriptBody = "Write-Host \"Configuring SSO\""
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        tenant_tags = ["Feature Set/SSO"]
+        worker_pool_variable = "RandomQuotes.WorkerPool"
+    }
+}
+
+step "configure-custom-branding" {
+    name = "Configure Custom Branding"
+
+    action {
+        action_type = "Octopus.Script"
+        notes = "Configure Custom Branding for any tenants with the Custom Branding tag."
+        properties = {
+            Octopus.Action.Script.ScriptBody = "Write-Host \"Configuring Custom Branding\""
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        tenant_tags = ["Feature Set/Custom Branding"]
+        worker_pool_variable = "RandomQuotes.WorkerPool"
+    }
+}
+
+step "send-completion-notification" {
+    condition = "Variable"
+    name = "Send Completion Notification"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Trigger.Id}True#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Email"
+        environments = ["production"]
+        is_required = true
+        notes = "Email the deployer that the deployment has been completed."
+        properties = {
+            Octopus.Action.Email.Body = "#{Octopus.Release.Notes}"
+            Octopus.Action.Email.Subject = "Release #{Octopus.Release.Number} has been deployed to #{Octopus.Environment.Name} for #{Octopus.Deployment.Tenant.Name}"
+            Octopus.Action.Email.To = "#{Octopus.Deployment.CreatedBy.EmailAddress}"
+        }
+        worker_pool_variable = ""
+    }
+}

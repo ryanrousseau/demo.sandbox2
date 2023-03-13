@@ -1,0 +1,119 @@
+variable "AppSettings:AppVersion" {
+    value "#{Octopus.Release.Number}" {}
+}
+
+variable "AppSettings:EnvironmentName" {
+    value "#{Octopus.Environment.Name} - #{Octopus.Deployment.Tenant.Name}" {}
+}
+
+variable "AppSettings:EnvironmentNameScoped" {
+    value "Development - #{Octopus.Deployment.Tenant.Name}" {
+        environment = ["development"]
+    }
+
+    value "Test - #{Octopus.Deployment.Tenant.Name}" {
+        environment = ["test"]
+    }
+
+    value "Production - #{Octopus.Deployment.Tenant.Name}" {
+        environment = ["production"]
+    }
+}
+
+variable "Octopus.Azure.Account" {
+    type = "AzureAccount"
+
+    value "tenants-azure-subscription" {}
+}
+
+variable "OctopusBypassDeploymentMutex" {
+    value "False" {
+        action = ["create-infrastructure"]
+    }
+}
+
+variable "OctopusPrintEvaluatedVariables" {
+    value "False" {
+        prompt {
+            description = ""
+            display_settings = {
+                Octopus.ControlType = "Checkbox"
+            }
+            label = "Print Evaluated Variables"
+        }
+    }
+}
+
+variable "OctopusPrintVariables" {
+    value "False" {
+        prompt {
+            description = ""
+            display_settings = {
+                Octopus.ControlType = "Checkbox"
+            }
+            label = "Print Variables"
+        }
+    }
+}
+
+variable "RandomQuotes.Azure.Account" {
+    type = "AzureAccount"
+
+    value "tenants-azure-subscription" {}
+}
+
+variable "RandomQuotes.Azure.Database.ConnectionString" {
+    value "Server=#{RandomQuotes.Azure.Database.Server};Initial Catalog=#{RandomQuotes.Azure.Database.Name};Persist Security Info=False;User ID=#{RandomQuotes.Azure.Database.User};Password=#{RandomQuotes.Azure.Database.UserPassword};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;" {}
+}
+
+variable "RandomQuotes.Azure.Database.Name" {
+    value "#{RandomQuotes.Tenant.Azure.Database.Name}" {}
+}
+
+variable "RandomQuotes.Azure.Database.Server" {
+    value "tcp:#{RandomQuotes.Azure.Database.ServerName}.database.windows.net,1433" {}
+}
+
+variable "RandomQuotes.Azure.Database.ServerName" {
+    value "octo-demo-sc" {}
+}
+
+variable "RandomQuotes.Azure.Database.User" {
+    value "octoadmin" {}
+}
+
+variable "RandomQuotes.Azure.Database.UserPassword" {
+    value "#{RandomQuotes.Tenant.Azure.Database.UserPassword}" {
+        description = ""
+    }
+}
+
+variable "RandomQuotes.Azure.ResourceGroup.Name" {
+    value "demo.octopus.app" {}
+}
+
+variable "RandomQuotes.Azure.WebApp.Description" {
+    value "Random Quotes web app for #{Octopus.Deployment.Tenant.Name}" {}
+}
+
+variable "RandomQuotes.Azure.WebApp.Name" {
+    value "#{RandomQuotes.Tenant.Azure.WebApp.Name}" {}
+}
+
+variable "RandomQuotes.Environment" {
+    value "#{Octopus.Environment.Name | ToLower}" {}
+}
+
+variable "RandomQuotes.Octopus.ApiKey" {
+    value {}
+}
+
+variable "RandomQuotes.Terraform.StateKey" {
+    value "#{Tenant.Key}-#{RandomQuotes.Environment}" {}
+}
+
+variable "RandomQuotes.WorkerPool" {
+    type = "WorkerPool"
+
+    value "azure-worker-pool" {}
+}
