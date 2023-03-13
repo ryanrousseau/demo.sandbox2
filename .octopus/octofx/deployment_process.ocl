@@ -1,0 +1,217 @@
+step "approve-production-release" {
+    condition = "Variable"
+    name = "Approve Production Release"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Trigger.Id}True#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Manual"
+        environments = ["production"]
+        is_required = true
+        notes = "Require approval from someone with the appropriate permissions."
+        properties = {
+            Octopus.Action.Manual.BlockConcurrentDeployments = "True"
+            Octopus.Action.Manual.Instructions = "Please provide approval notes."
+            Octopus.Action.Manual.ResponsibleTeamIds = "global/demo-presenters"
+        }
+        worker_pool_variable = ""
+    }
+}
+
+step "deploy-database-changes" {
+    name = "Deploy Database Changes"
+
+    action {
+        action_type = "Octopus.Script"
+        notes = "Deploy database changes using a [Worker](https://octopus.com/docs/infrastructure/workers) and [DbUp](https://dbup.readthedocs.io/en/latest/)."
+        properties = {
+            Octopus.Action.EnabledFeatures = "Octopus.Features.ConfigurationVariables"
+            Octopus.Action.Package.AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
+            Octopus.Action.Package.DownloadOnTentacle = "False"
+            Octopus.Action.Package.FeedId = "azure-devops-artifacts"
+            Octopus.Action.Package.PackageId = "OctoFX.Database"
+            Octopus.Action.Script.ScriptFileName = "Deploy.ps1"
+            Octopus.Action.Script.ScriptSource = "Package"
+        }
+        worker_pool_variable = "OctoFX.WorkerPool"
+
+        packages {
+            acquisition_location = "Server"
+            feed = "azure-devops-artifacts"
+            package_id = "OctoFX.Database"
+            properties = {
+                SelectionMode = "immediate"
+            }
+        }
+    }
+}
+
+step "deploy-rate-service" {
+    name = "Deploy Rate Service"
+    properties = {
+        Octopus.Action.TargetRoles = "octofx-service"
+    }
+
+    action {
+        action_type = "Octopus.WindowsService"
+        notes = "Deploy a Windows Service to a VM in Azure."
+        properties = {
+            Octopus.Action.EnabledFeatures = ",Octopus.Features.WindowsService,Octopus.Features.ConfigurationTransforms,Octopus.Features.ConfigurationVariables"
+            Octopus.Action.Package.AutomaticallyRunConfigurationTransformationFiles = "True"
+            Octopus.Action.Package.AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
+            Octopus.Action.Package.DownloadOnTentacle = "False"
+            Octopus.Action.Package.FeedId = "azure-devops-artifacts"
+            Octopus.Action.Package.PackageId = "OctoFX.RateService"
+            Octopus.Action.WindowsService.CreateOrUpdateService = "True"
+            Octopus.Action.WindowsService.Description = "OctoFX Rate Service"
+            Octopus.Action.WindowsService.DesiredStatus = "Default"
+            Octopus.Action.WindowsService.DisplayName = "OctoFX Rate Service"
+            Octopus.Action.WindowsService.ExecutablePath = "OctoFX.RateService.exe"
+            Octopus.Action.WindowsService.ServiceAccount = "LocalSystem"
+            Octopus.Action.WindowsService.ServiceName = "OctoFX-Rate-Service"
+            Octopus.Action.WindowsService.StartMode = "auto"
+        }
+        worker_pool_variable = ""
+
+        packages {
+            acquisition_location = "Server"
+            feed = "azure-devops-artifacts"
+            package_id = "OctoFX.RateService"
+            properties = {
+                SelectionMode = "immediate"
+            }
+        }
+    }
+}
+
+step "deploy-trading-site" {
+    name = "Deploy Trading Site"
+    properties = {
+        Octopus.Action.MaxParallelism = "1"
+        Octopus.Action.TargetRoles = "octofx-web"
+    }
+
+    action "remove-from-azure-load-balancer" {
+        action_type = "Octopus.AzurePowerShell"
+        environments = ["production"]
+        name = "Remove from Azure Load Balancer"
+        notes = "Use the Azure CLI to remove the VM from the load balancer."
+        properties = {
+            Octopus.Action.Azure.AccountId = "#{OctoFX.Azure.Account}"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $resourceGroup = "demo.octopus.app"
+                $loadBalancer = "demo-loadbalancer"
+                $addressPool = "octofx-web-production"
+                $ipConfig = "ipconfig1"
+                $nic = $OctopusParameters["OctoFX.VM.Nic"]
+                
+                az network nic ip-config address-pool remove -g $resourceGroup --lb-name $loadBalancer --address-pool $addressPool --ip-config-name $ipConfig --nic-name $nic
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "OctoFX.WorkerPool"
+    }
+
+    action "deploy-trading-site" {
+        action_type = "Octopus.IIS"
+        name = "Deploy Trading Site"
+        notes = "Deploy the Trading Site to IIS on a VM in Azure."
+        properties = {
+            Octopus.Action.EnabledFeatures = "Octopus.Features.IISWebSite,Octopus.Features.ConfigurationVariables,Octopus.Features.ConfigurationTransforms"
+            Octopus.Action.IISWebSite.ApplicationPoolFrameworkVersion = "v4.0"
+            Octopus.Action.IISWebSite.ApplicationPoolIdentityType = "ApplicationPoolIdentity"
+            Octopus.Action.IISWebSite.ApplicationPoolName = "#{OctoFX.TradingSite.AppPoolName}"
+            Octopus.Action.IISWebSite.Bindings = "[{\"protocol\":\"http\",\"port\":\"80\",\"host\":\"\",\"thumbprint\":null,\"certificateVariable\":null,\"requireSni\":\"False\",\"enabled\":\"True\"}]"
+            Octopus.Action.IISWebSite.CreateOrUpdateWebSite = "True"
+            Octopus.Action.IISWebSite.DeploymentType = "webSite"
+            Octopus.Action.IISWebSite.EnableAnonymousAuthentication = "True"
+            Octopus.Action.IISWebSite.EnableBasicAuthentication = "False"
+            Octopus.Action.IISWebSite.EnableWindowsAuthentication = "False"
+            Octopus.Action.IISWebSite.StartApplicationPool = "True"
+            Octopus.Action.IISWebSite.StartWebSite = "True"
+            Octopus.Action.IISWebSite.WebApplication.ApplicationPoolFrameworkVersion = "v4.0"
+            Octopus.Action.IISWebSite.WebApplication.ApplicationPoolIdentityType = "ApplicationPoolIdentity"
+            Octopus.Action.IISWebSite.WebRootType = "packageRoot"
+            Octopus.Action.IISWebSite.WebSiteName = "#{OctoFX.TradingSite.Name}"
+            Octopus.Action.Package.AutomaticallyRunConfigurationTransformationFiles = "True"
+            Octopus.Action.Package.AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
+            Octopus.Action.Package.DownloadOnTentacle = "False"
+            Octopus.Action.Package.FeedId = "azure-devops-artifacts"
+            Octopus.Action.Package.PackageId = "OctoFX.TradingWebsite"
+        }
+        worker_pool_variable = ""
+
+        packages {
+            acquisition_location = "Server"
+            feed = "azure-devops-artifacts"
+            package_id = "OctoFX.TradingWebsite"
+            properties = {
+                SelectionMode = "immediate"
+            }
+        }
+    }
+
+    action "smoke-test-trading-site" {
+        action_type = "Octopus.Script"
+        name = "Smoke Test Trading Site"
+        notes = "Make a request to the site to verify that it is running correctly."
+        properties = {
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $URI = $OctopusParameters["OctoFX.TradingSite.Url"]
+                Invoke-WebRequest -URI "${URI}" -UseBasicParsing
+                
+                Write-Highlight "[$URI](${URI})"
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool_variable = "OctoFX.WorkerPool"
+    }
+
+    action "add-to-azure-load-balancer" {
+        action_type = "Octopus.AzurePowerShell"
+        environments = ["production"]
+        name = "Add to Azure Load Balancer"
+        notes = "Use the Azure CLI to add the VM to the load balancer."
+        properties = {
+            Octopus.Action.Azure.AccountId = "#{OctoFX.Azure.Account}"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $resourceGroup = "demo.octopus.app"
+                $loadBalancer = "demo-loadbalancer"
+                $addressPool = "octofx-web-production"
+                $ipConfig = "ipconfig1"
+                $nic = $OctopusParameters["OctoFX.VM.Nic"]
+                
+                az network nic ip-config address-pool add -g $resourceGroup --lb-name $loadBalancer --address-pool $addressPool --ip-config-name $ipConfig --nic-name $nic
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "OctoFX.WorkerPool"
+    }
+}
+
+step "send-completion-notification" {
+    condition = "Variable"
+    name = "Send Completion Notification"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Trigger.Id}True#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Email"
+        environments = ["production"]
+        notes = "Email the deployer that the deployment has been completed."
+        properties = {
+            Octopus.Action.Email.Body = "#{Octopus.Release.Notes}"
+            Octopus.Action.Email.IsHtml = "True"
+            Octopus.Action.Email.Subject = "Release #{Octopus.Release.Number} has been deployed to #{Octopus.Environment.Name}"
+            Octopus.Action.Email.To = "#{Octopus.Deployment.CreatedBy.EmailAddress}"
+        }
+        worker_pool_variable = ""
+    }
+}

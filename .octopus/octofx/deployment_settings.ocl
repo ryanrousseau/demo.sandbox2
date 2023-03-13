@@ -1,0 +1,15 @@
+release_notes_template = <<-EOT
+        Here are the notes for the packages
+        #{each package in Octopus.Release.Package}
+        - #{package.PackageId} #{package.Version}
+        #{each commit in package.Commits}
+            - [#{commit.CommitId}](#{commit.LinkUrl}) - #{commit.Comment}
+        #{/each}
+        #{/each}
+        EOT
+
+connectivity_policy {}
+
+versioning_strategy {
+    template = "#{Octopus.Version.LastMajor}.#{Octopus.Version.LastMinor}.#{Octopus.Version.NextPatch}"
+}

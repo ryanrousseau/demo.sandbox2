@@ -1,0 +1,93 @@
+variable "OctoFX.Azure.Account" {
+    type = "AzureAccount"
+
+    value "octofx-azure-subscription" {}
+}
+
+variable "OctoFX.Database.Admin.User" {
+    value "octoadmin" {}
+}
+
+variable "OctoFX.Database.Name" {
+    value "octofx-development" {
+        environment = ["development"]
+    }
+
+    value "octofx-test" {
+        environment = ["test"]
+    }
+
+    value "octofx-production" {
+        environment = ["production"]
+    }
+}
+
+variable "OctoFX.Database.Role" {
+    value "db_owner" {}
+}
+
+variable "OctoFX.Database.Server" {
+    value "tcp:octo-demo.database.windows.net,1433" {}
+}
+
+variable "OctoFX.Database.User" {
+    value "octoadmin" {}
+}
+
+variable "OctoFX.TradingSite.AppPoolName" {
+    value "OctoFX" {}
+}
+
+variable "OctoFX.TradingSite.Name" {
+    value "OctoFX" {}
+}
+
+variable "OctoFX.TradingSite.Url" {
+    value "http://octofx-web-1.westus2.cloudapp.azure.com/" {
+        environment = ["development"]
+    }
+
+    value "http://octofx-web-2.westus2.cloudapp.azure.com" {
+        environment = ["test"]
+    }
+
+    value "http://octofx-web-3.westus2.cloudapp.azure.com" {
+        role = ["octofx-web-3"]
+    }
+
+    value "http://octofx-web-4.westus2.cloudapp.azure.com" {
+        role = ["octofx-web-4"]
+    }
+}
+
+variable "OctoFX.VM.Admin.Username" {
+    value "octoadmin" {}
+}
+
+variable "OctoFX.VM.Nic" {
+    value "octofx-web-3740" {
+        role = ["octofx-web-3"]
+    }
+
+    value "octofx-web-4452" {
+        role = ["octofx-web-4"]
+    }
+}
+
+variable "OctoFX.WorkerPool" {
+    type = "WorkerPool"
+
+    value "azure-worker-pool" {}
+}
+
+variable "OctoFXDatabase" {
+    value "Server=#{OctoFX.Database.Server};Initial Catalog=#{OctoFX.Database.Name};Persist Security Info=False;User ID=#{OctoFX.Database.User};Password=#{OctoFX.Database.UserPassword};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;" {}
+}
+
+variable "OctopusPrintEvaluatedVariables" {
+    value "False" {}
+}
+
+variable "OctopusPrintVariables" {
+    value "False" {}
+}
