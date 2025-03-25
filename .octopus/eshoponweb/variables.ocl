@@ -70,3 +70,9 @@ variable "Project.Worker.Pool" {
 
     value "aws-worker-pool" {}
 }
+
+variable "Octopus.Aws.Account" {
+    type = "AmazonWebServicesAccount"
+
+    value "aws-account" {}
+}
