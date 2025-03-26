@@ -76,3 +76,17 @@ variable "Octopus.Aws.Account" {
 
     value "aws-account" {}
 }
+
+variable "Project.WebService.TaskName" {
+    value "web-dev" {
+        environment = ["development"]
+    }
+
+    value "web" {
+        environment = ["production"]
+    }
+
+    value "web-test" {
+        environment = ["test"]
+    }
+}
