@@ -1,0 +1,423 @@
+step "get-aws-resource-ids" {
+    name = "Get AWS Resource Ids"
+
+    action {
+        action_type = "Octopus.AwsRunScript"
+        notes = "Get ID values for the VPC, Security Group, Subnets, and Internet Gateway and set them as [output variables](https://octopus.com/docs/projects/variables/output-variables) for use in subsequent steps."
+        properties = {
+            Octopus.Action.Aws.AssumeRole = "False"
+            Octopus.Action.Aws.Region = "#{Project.AWS.Region.Code}"
+            Octopus.Action.AwsAccount.UseInstanceRole = "True"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                # Get the VPC
+                $awsVpc = (aws ec2 describe-vpcs --filter Name=tag:Name,Values="demo-vpc" --output json | ConvertFrom-Json)
+                
+                # Set output variable for Vpc id
+                Write-Host "Setting output variable VpcId with value $($awsVpc.Vpcs[0].VpcId)"
+                Set-OctopusVariable -name "VpcId" -value $awsVpc.Vpcs[0].VpcId
+                
+                # Get Security Group Id
+                $awsSecurityGroup = (aws ec2 describe-security-groups --filter Name=tag:Name,Values="demo-security-group" --output json | ConvertFrom-Json)
+                
+                # Set output variable for security group id
+                Write-Host "Setting output variable SecurityGroupId with value $($awsSecurityGroup.SecurityGroups[0].GroupId)"
+                Set-OctopusVariable -Name "SecurityGroupId" -value $awsSecurityGroup.SecurityGroups[0].GroupId
+                
+                # Get Subnets
+                $awsSubnets = (aws ec2 describe-subnets --filter Name=vpc-id,Values="$($awsVpc.Vpcs[0].VpcId)" Name=tag:Name,Values="demo-*" --output json | ConvertFrom-Json)
+                
+                # Set the subnet id output variable
+                Write-Host "Setting output variable SubnetIds with value $($awsSubnets.Subnets[0].SubnetId)"
+                Set-OctopusVariable -Name "SubnetId" -value "$($awsSubnets.Subnets[0].SubnetId)"
+                
+                # Get the Internet Gateway
+                $awsInternetGateway = (aws ec2 describe-internet-gateways --filter Name="attachment.vpc-id",Values="$($awsVpc.Vpcs[0].VpcId)" --output json | ConvertFrom-Json)
+                
+                # Set the internet gateway output variable
+                Write-Host "Setting output variable InternetGatewayId with value $($awsInternetGateway.InternetGateways[0].InternetGatewayId)"
+                Set-OctopusVariable -Name "InternetGatewayId" -value $awsInternetGateway.InternetGateways[0].InternetGatewayId
+                
+                
+                
+                
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "Project.Worker.Pool"
+    }
+}
+
+step "get-endpoint-address" {
+    name = "Get endpoint address"
+
+    action {
+        action_type = "Octopus.AwsRunScript"
+        notes = "Get the RDS endpoint (database server name) and set as an [output variable](https://octopus.com/docs/projects/variables/output-variables) for use in the ECS Service deployments."
+        properties = {
+            Octopus.Action.Aws.AssumeRole = "False"
+            Octopus.Action.Aws.Region = "#{Project.AWS.Region.Code}"
+            Octopus.Action.AwsAccount.UseInstanceRole = "True"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                # Get region
+                $awsRegion = $OctopusParameters['Project.AWS.Region.Code']
+                
+                Write-Host "Selected region is: $awsRegion"
+                
+                # Get reference to the instance
+                $databaseInstances = (aws rds describe-db-instances --region "$awsRegion") | ConvertFrom-JSON
+                 
+                # Get MariaDB instance
+                $databaseInstance = $databaseInstances.DBInstances | Where-Object {$_.Engine -eq "sqlserver-ex"}
+                
+                # Set the output variable
+                Write-Host "Setting output variable AWS.RDS.Endpoint.Address to $($databaseInstance.Endpoint.Address)"
+                Set-OctopusVariable -name "AWS.RDS.EndPoint.Address" -value $databaseInstance.Endpoint.Address
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "Project.Worker.Pool"
+    }
+}
+
+step "deploy-vote-service-clone-1" {
+    name = "Deploy eshop-api Service"
+    package_requirement = "AfterPackageAcquisition"
+    properties = {
+        Octopus.Action.TargetRoles = "ECS-Voting"
+    }
+
+    action "deploy-eshop-api-service" {
+        action_type = "aws-ecs"
+        notes = "Deploy the API service for the eShopOnWeb applciation."
+        step_package_version = "1.3.4"
+        worker_pool_variable = "Project.Worker.Pool"
+
+        packages "eshop-api" {
+            acquisition_location = "NotAcquired"
+            feed = "aws-ecr"
+            package_id = "eshop-api"
+            step_package_inputs_reference_id = "e8ec47ee-474f-4e9f-b145-12130669d3c0"
+        }
+
+        inputs {
+            desiredCount = 1
+            maximumHealthPercent = 200
+            minimumHealthPercent = 100
+            name = "#{Project.AWS.ECS.Api.Task.Name}"
+
+            additionalTags {
+                enableEcsManagedTags = false
+            }
+
+            containers {
+                containerName = "eshop-api"
+                essential = true
+
+                containerImageReference {
+                    feedId = "Feeds-2520"
+                    imageName = "eshop-api"
+                    referenceId = "e8ec47ee-474f-4e9f-b145-12130669d3c0"
+                }
+
+                containerLogging {
+                    type = "auto"
+                }
+
+                containerPortMappings {
+                    containerPort = 80
+                    protocol = "tcp"
+                }
+
+                containerStorage {
+                    readOnlyRootFileSystem = false
+                }
+
+                environmentVariables {
+                    key = "ConnectionStrings__CatalogConnection"
+                    type = "plain"
+                    value = "Server=#{Project.SQL.DNS},1433;Integrated Security=true;Initial Catalog=#{Project.Catalog.Database.Name};User Id=#{AWS.RDS.Admin.Username};Password=#{AWS.RDS.Admin.Password};Trusted_Connection=false;Trust Server Certificate=True;"
+                }
+
+                environmentVariables {
+                    key = "ConnectionStrings__IdentityConnection"
+                    type = "plain"
+                    value = "Server=#{Project.SQL.DNS},1433;Integrated Security=true;Initial Catalog=#{Project.Identity.Database.Name};User Id=#{AWS.RDS.Admin.Username};Password=#{AWS.RDS.Admin.Password};Trusted_Connection=false;Trust Server Certificate=True;"
+                }
+
+                environmentVariables {
+                    key = "ASPNETCORE_URLS"
+                    type = "plain"
+                    value = "http://+:80"
+                }
+
+                healthCheck {}
+
+                networkSettings {
+                    disableNetworking = false
+                }
+
+                repositoryAuthentication {
+                    type = "default"
+                }
+            }
+
+            networkConfiguration {
+                autoAssignPublicIp = true
+
+                securityGroupIds {
+                    id = "#{Project.AWS.SecurityGroup.Id}"
+                }
+
+                subnetIds {
+                    id = "#{Project.AWS.Subnet.Id}"
+                }
+            }
+
+            task {
+                cpu = 256
+                memory = 512
+                taskExecutionRole = "#{Project.AWS.TaskExecutionRole.Arn}"
+                taskRole = ""
+
+                runtimePlatform {
+                    cpuArchitecture = "X86_64"
+                    operatingSystemFamily = "LINUX"
+                }
+            }
+
+            waitOption {
+                timeout = 30
+                type = "waitWithTimeout"
+            }
+        }
+    }
+}
+
+step "get-sql-dns-clone-1" {
+    name = "Get API DNS"
+
+    action {
+        action_type = "Octopus.AwsRunScript"
+        notes = "Get the DNS entry of the API and set as an [output variable](https://octopus.com/docs/projects/variables/output-variables) to pass as an environment variable to the eShopOnWeb front end."
+        properties = {
+            Octopus.Action.Aws.AssumeRole = "False"
+            Octopus.Action.Aws.Region = "#{Project.AWS.Region.Code}"
+            Octopus.Action.AwsAccount.UseInstanceRole = "True"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                # Declare local variables
+                $serviceName = $OctopusParameters['Project.AWS.ECS.Api.Task.Name']
+                $serviceName = $serviceName.Replace("-", "")
+                $region = $OctopusParameters['Project.AWS.Region.Code']
+                $clusterName = $OctopusParameters['Project.AWS.ECS.Cluster.Name']
+                
+                # Get list of services
+                $services = (aws ecs list-services --cluster $clusterName --region $region | ConvertFrom-Json)
+                
+                # Get the specific service we're looking for
+                $service = $services.serviceArns | Where-Object {$_ -like "*$($serviceName)*"}
+                
+                # Get the specific service we're looking for
+                $service = $services.serviceArns | Where-Object {$_ -like "*$($serviceName)*"}
+                
+                # Check to see if a service was returned
+                if ($null -eq $service)
+                {
+                	# Check for other variants
+                    $serviceName = $serviceName.Replace("-", "")
+                    $service = $services.serviceArns | Where-Object {$_ -like "*$($serviceName)*"}
+                    
+                    # Throw an error if it still isn't found
+                    if ($null -eq $service)
+                    {
+                    	Write-Error "Unable to find service!"
+                    }
+                }
+                
+                # Get the task the service is running
+                $task = (aws ecs list-tasks --cluster $clusterName --region $region --service-name $service.Substring($service.LastIndexOf("/") + 1) | ConvertFrom-Json)
+                
+                # Get the specifics of the task
+                $taskSpecs = (aws ecs describe-tasks --cluster $clusterName  --region $region --tasks "$($task.taskArns)" | ConvertFrom-Json)
+                
+                $dnsName = $taskSpecs.tasks[0].attachments[0].details | Where-Object {$_.Name -eq "privateDnsName"}
+                
+                Set-OctopusVariable -name "API_DNS" -value $dnsName.value
+                
+                
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "Project.Worker.Pool"
+    }
+}
+
+step "deploy-eshop-api-service-clone-1" {
+    name = "Deploy eshop-web Service"
+    package_requirement = "AfterPackageAcquisition"
+    properties = {
+        Octopus.Action.TargetRoles = "ECS-Voting"
+    }
+
+    action {
+        action_type = "aws-ecs"
+        notes = "Deploy the eShopOnWeb front end ECS service."
+        step_package_version = "1.3.4"
+        worker_pool_variable = "Project.Worker.Pool"
+
+        packages "eshop-web" {
+            acquisition_location = "NotAcquired"
+            feed = "aws-ecr"
+            package_id = "eshop-web"
+            step_package_inputs_reference_id = "e8ec47ee-474f-4e9f-b145-12130669d3c0"
+        }
+
+        inputs {
+            desiredCount = 1
+            maximumHealthPercent = 200
+            minimumHealthPercent = 100
+            name = "#{Project.AWS.ECS.Web.Task.Name}"
+
+            additionalTags {
+                enableEcsManagedTags = false
+            }
+
+            containers {
+                containerName = "eshop-web"
+                essential = true
+
+                containerImageReference {
+                    feedId = "Feeds-2520"
+                    imageName = "eshop-web"
+                    referenceId = "e8ec47ee-474f-4e9f-b145-12130669d3c0"
+                }
+
+                containerLogging {
+                    type = "auto"
+                }
+
+                containerPortMappings {
+                    containerPort = 80
+                    protocol = "tcp"
+                }
+
+                containerStorage {
+                    readOnlyRootFileSystem = false
+                }
+
+                environmentVariables {
+                    key = "ConnectionStrings__CatalogConnection"
+                    type = "plain"
+                    value = "Server=#{Project.SQL.DNS},1433;Integrated Security=true;Initial Catalog=#{Project.Catalog.Database.Name};User Id=#{AWS.RDS.Admin.Username};Password=#{AWS.RDS.Admin.Password};Trusted_Connection=false;Trust Server Certificate=True;"
+                }
+
+                environmentVariables {
+                    key = "ConnectionStrings__IdentityConnection"
+                    type = "plain"
+                    value = "Server=#{Project.SQL.DNS},1433;Integrated Security=true;Initial Catalog=#{Project.Identity.Database.Name};User Id=#{AWS.RDS.Admin.Username};Password=#{AWS.RDS.Admin.Password};Trusted_Connection=false;Trust Server Certificate=True;"
+                }
+
+                environmentVariables {
+                    key = "ASPNETCORE_URLS"
+                    type = "plain"
+                    value = "http://+:80"
+                }
+
+                environmentVariables {
+                    key = "baseUrls__apiBase"
+                    type = "plain"
+                    value = "http://#{Project.API.DNS}/api/"
+                }
+
+                healthCheck {}
+
+                networkSettings {
+                    disableNetworking = false
+                }
+
+                repositoryAuthentication {
+                    type = "default"
+                }
+            }
+
+            networkConfiguration {
+                autoAssignPublicIp = true
+
+                securityGroupIds {
+                    id = "#{Project.AWS.SecurityGroup.Id}"
+                }
+
+                subnetIds {
+                    id = "#{Project.AWS.Subnet.Id}"
+                }
+            }
+
+            task {
+                cpu = 256
+                memory = 512
+                taskExecutionRole = "#{Project.AWS.TaskExecutionRole.Arn}"
+                taskRole = ""
+
+                runtimePlatform {
+                    cpuArchitecture = "X86_64"
+                    operatingSystemFamily = "LINUX"
+                }
+            }
+
+            waitOption {
+                timeout = 30
+                type = "waitWithTimeout"
+            }
+        }
+    }
+}
+
+step "get-api-dns-clone-1" {
+    name = "Get Web Public DNS"
+
+    action "get-web-public-dns" {
+        action_type = "Octopus.AwsRunScript"
+        notes = "Get the public DNS of the eShopOnWeb frontend ECS service and display the URL link."
+        properties = {
+            Octopus.Action.Aws.AssumeRole = "False"
+            Octopus.Action.Aws.Region = "#{Project.AWS.Region.Code}"
+            Octopus.Action.AwsAccount.UseInstanceRole = "True"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                # Declare local variables
+                $serviceName = $OctopusParameters['Project.AWS.ECS.Web.Task.Name']
+                $serviceName = $serviceName.Replace("-", "")
+                $region = $OctopusParameters['Project.AWS.Region.Code']
+                $clusterName = $OctopusParameters['Project.AWS.ECS.Cluster.Name']
+                
+                # Get list of services
+                $services = (aws ecs list-services --cluster $clusterName --region $region | ConvertFrom-Json)
+                
+                # Get the specific service we're looking for
+                $service = $services.serviceArns | Where-Object {$_ -like "*$($serviceName)*"}
+                
+                # Get the task the service is running
+                $task = (aws ecs list-tasks --cluster $clusterName --region $region --service-name $service.Substring($service.LastIndexOf("/") + 1) | ConvertFrom-Json)
+                
+                # Get the specifics of the task
+                $taskSpecs = (aws ecs describe-tasks --cluster $clusterName  --region $region --tasks "$($task.taskArns)" | ConvertFrom-Json)
+                
+                # Get the network interface id
+                $networkInterfaceId = $taskSpecs.tasks[0].attachments[0].details | Where-Object {$_.Name -eq "networkInterfaceId"}
+                
+                # Get the network interface details
+                $networkInterface = (aws ec2 describe-network-interfaces --network-interface-ids $networkInterfaceId.value --region $region | ConvertFrom-Json)
+                
+                Write-Highlight "[eShopOnWeb in ECS](http://$($networkInterface.NetworkInterfaces[0].Association.PublicDnsName))"
+                EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+        worker_pool_variable = "Project.Worker.Pool"
+    }
+}

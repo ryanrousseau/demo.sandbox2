@@ -1,0 +1,72 @@
+variable "Octopus.Aws.Regions" {
+    value "us-east-2" {
+        action = ["deploy-eshop-api-service"]
+        description = ""
+    }
+}
+
+variable "Project.API.DNS" {
+    value "#{Octopus.Action[Get API DNS].Output.api_DNS}" {}
+}
+
+variable "Project.AWS.ECS.Api.Task.Name" {
+    value "eshop-api-#{Project.Cleaned.Space.Name}-#{Project.Cleaned.Environment.Name}" {}
+}
+
+variable "Project.AWS.ECS.Cluster.Name" {
+    value "demo-cluster-#{Project.Cleaned.Environment.Name}" {}
+}
+
+variable "Project.AWS.ECS.Sql.Task.Name" {
+    value "eshop-sql-#{Project.Cleaned.Space.Name}-#{Project.Cleaned.Environment.Name}" {}
+}
+
+variable "Project.AWS.ECS.Web.Task.Name" {
+    value "eshop-web-#{Project.Cleaned.Space.Name}-#{Project.Cleaned.Environment.Name}" {}
+}
+
+variable "Project.AWS.Region.Code" {
+    value "us-east-2" {}
+}
+
+variable "Project.AWS.SecurityGroup.Id" {
+    value "#{Octopus.Action[Get AWS Resource Ids].Output.SecurityGroupId}" {}
+}
+
+variable "Project.AWS.Subnet.Id" {
+    value "#{Octopus.Action[Get AWS Resource Ids].Output.SubnetId}" {}
+}
+
+variable "Project.AWS.TaskExecutionRole.Arn" {
+    value "arn:aws:iam::623990049154:role/ecsTaskExecutionRole" {}
+}
+
+variable "Project.AWS.VPC.Name" {
+    value "#{Octopus.Action[Get AWS Resource Ids].Output.VpcId}" {}
+}
+
+variable "Project.Catalog.Database.Name" {
+    value "#{Project.Cleaned.Space.Name}-#{Project.Cleaned.Environment.Name}-catalog" {}
+}
+
+variable "Project.Cleaned.Environment.Name" {
+    value "#{Octopus.Environment.Name | Replace \"[^a-zA-Z]+\" \"-\" | ToLower}" {}
+}
+
+variable "Project.Cleaned.Space.Name" {
+    value "#{Octopus.Space.Name | Replace \"[^a-zA-Z]+\" \"-\" | ToLower}" {}
+}
+
+variable "Project.Identity.Database.Name" {
+    value "#{Project.Cleaned.Space.Name}-#{Project.Cleaned.Environment.Name}-identity" {}
+}
+
+variable "Project.SQL.DNS" {
+    value "#{Octopus.Action[Get endpoint address].Output.AWS.RDS.EndPoint.Address}" {}
+}
+
+variable "Project.Worker.Pool" {
+    type = "WorkerPool"
+
+    value "aws-worker-pool" {}
+}
